@@ -1,16 +1,18 @@
-import { PrismaClient } from "@/lib/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+// Prisma client stub for wireframe mode.
+// In production, this will be replaced with the actual Prisma client
+// configured with PostgreSQL. For the wireframe, all data operations
+// go through lib/db/mock-store.ts instead.
 
-const connectionString = process.env.DATABASE_URL ?? "";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const noopProxy: any = new Proxy(
+  {},
+  {
+    get: () =>
+      new Proxy(() => {}, {
+        get: () => () => Promise.resolve(null),
+        apply: () => Promise.resolve(null),
+      }),
+  },
+);
 
-const adapter = new PrismaPg({ connectionString });
-
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
-
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+export const prisma: any = noopProxy;

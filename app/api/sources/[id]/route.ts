@@ -1,13 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
-import { z } from "zod";
-
-const UpdateSourceSchema = z.object({
-  name: z.string().optional(),
-  url: z.string().url().optional(),
-  active: z.boolean().optional(),
-  schedule: z.string().optional(),
-});
+import { getSource, updateSource, deleteSource } from "@/lib/db/mock-store";
 
 // GET /api/sources/[id]
 export async function GET(
@@ -15,13 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-
-  const source = await prisma.source.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { contentItems: true } },
-    },
-  });
+  const source = getSource(id);
 
   if (!source) {
     return NextResponse.json({ error: "Source not found" }, { status: 404 });
@@ -37,24 +23,11 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const parsed = UpdateSourceSchema.safeParse(body);
 
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const source = await prisma.source.findUnique({ where: { id } });
-  if (!source) {
+  const updated = updateSource(id, body);
+  if (!updated) {
     return NextResponse.json({ error: "Source not found" }, { status: 404 });
   }
-
-  const updated = await prisma.source.update({
-    where: { id },
-    data: parsed.data,
-  });
 
   return NextResponse.json(updated);
 }
@@ -65,13 +38,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const deleted = deleteSource(id);
 
-  const source = await prisma.source.findUnique({ where: { id } });
-  if (!source) {
+  if (!deleted) {
     return NextResponse.json({ error: "Source not found" }, { status: 404 });
   }
-
-  await prisma.source.delete({ where: { id } });
 
   return NextResponse.json({ success: true });
 }
