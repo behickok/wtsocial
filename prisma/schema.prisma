@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  admin
+  editor
+  viewer
+}
+
+enum SourceType {
+  rss
+  manual
+}
+
+enum ContentStatus {
+  ingested
+  summarizing
+  summarized
+  generating_image
+  ready_for_review
+  approved
+  publishing
+  published
+  rejected
+  failed
+}
+
+enum PublishTargetType {
+  wix
+  linkedin
+  hubspot
+}
+
+enum PublishStatus {
+  pending
+  published
+  failed
+}
+
+enum PipelineStageType {
+  ingestion
+  summarization
+  image_generation
+  review
+  publishing
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  settings  Json     @default("{}")
+  branding  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users           User[]
+  sources         Source[]
+  contentItems    ContentItem[]
+  imageTemplates  ImageTemplate[]
+  publishTargets  PublishTarget[]
+  promptTemplates PromptTemplate[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  email          String       @unique
+  name           String?
+  role           UserRole     @default(viewer)
+  externalId     String?      @unique @map("external_id")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Source {
+  id             String     @id @default(cuid())
+  organizationId String     @map("organization_id")
+  type           SourceType
+  name           String
+  url            String
+  schedule       String?    // cron expression for RSS polling
+  active         Boolean    @default(true)
+  lastPolledAt   DateTime?  @map("last_polled_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contentItems ContentItem[]
+
+  @@index([organizationId])
+  @@index([active, type])
+  @@map("sources")
+}
+
+model ContentItem {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  sourceId       String?       @map("source_id")
+  originalUrl    String        @map("original_url")
+  title          String?
+  author         String?
+  publishedDate  DateTime?     @map("published_date")
+  sourceDomain   String?       @map("source_domain")
+  rawContent     String?       @map("raw_content") @db.Text
+  featuredImage  String?       @map("featured_image")
+  status         ContentStatus @default(ingested)
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  source         Source?         @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  summaries      Summary[]
+  generatedImages GeneratedImage[]
+  publishRecords PublishRecord[]
+  pipelineRuns   PipelineRun[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("content_items")
+}
+
+model Summary {
+  id               String   @id @default(cuid())
+  contentItemId    String   @map("content_item_id")
+  promptTemplateId String?  @map("prompt_template_id")
+  modelUsed        String   @map("model_used")
+  body             String   @db.Text
+  knote            String?  @db.Text
+  version          Int      @default(1)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  contentItem    ContentItem     @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  promptTemplate PromptTemplate? @relation(fields: [promptTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([contentItemId])
+  @@map("summaries")
+}
+
+model GeneratedImage {
+  id            String   @id @default(cuid())
+  contentItemId String   @map("content_item_id")
+  templateId    String?  @map("template_id")
+  imageUrl      String   @map("image_url")
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  contentItem   ContentItem    @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  imageTemplate ImageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([contentItemId])
+  @@map("generated_images")
+}
+
+model ImageTemplate {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  layoutConfig   Json     @map("layout_config") @default("{}")
+  defaultColors  Json     @map("default_colors") @default("{}")
+  width          Int      @default(980)
+  height         Int      @default(515)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  generatedImages GeneratedImage[]
+
+  @@index([organizationId])
+  @@map("image_templates")
+}
+
+model PublishTarget {
+  id             String            @id @default(cuid())
+  organizationId String            @map("organization_id")
+  type           PublishTargetType
+  name           String
+  credentials    Json              @default("{}") // encrypted at rest
+  settings       Json              @default("{}")
+  active         Boolean           @default(true)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publishRecords PublishRecord[]
+
+  @@index([organizationId])
+  @@map("publish_targets")
+}
+
+model PublishRecord {
+  id            String        @id @default(cuid())
+  contentItemId String        @map("content_item_id")
+  targetId      String        @map("target_id")
+  externalId    String?       @map("external_id")
+  status        PublishStatus @default(pending)
+  publishedAt   DateTime?     @map("published_at")
+  errorMessage  String?       @map("error_message") @db.Text
+  attempts      Int           @default(0)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  contentItem  ContentItem   @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  publishTarget PublishTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([contentItemId])
+  @@index([targetId])
+  @@index([status])
+  @@map("publish_records")
+}
+
+model PromptTemplate {
+  id                 String   @id @default(cuid())
+  organizationId     String   @map("organization_id")
+  name               String
+  systemPrompt       String   @map("system_prompt") @db.Text
+  userPromptTemplate String   @map("user_prompt_template") @db.Text
+  model              String   @default("claude-sonnet-4-5-20250514")
+  temperature        Float    @default(0.3)
+  maxTokens          Int      @default(1500) @map("max_tokens")
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  summaries    Summary[]
+
+  @@index([organizationId])
+  @@map("prompt_templates")
+}
+
+model PipelineRun {
+  id            String    @id @default(cuid())
+  contentItemId String    @map("content_item_id")
+  stages        Json      @default("[]")
+  currentStage  String?   @map("current_stage")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  errors        Json      @default("[]")
+
+  contentItem ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  @@index([contentItemId])
+  @@index([startedAt])
+  @@map("pipeline_runs")
+}
